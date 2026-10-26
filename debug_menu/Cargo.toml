@@ -1,0 +1,12 @@
+[package]
+name = "debug_menu"
+version = "0.1.0"
+edition = "2021"
+description = "Example Burnout_PC.exe mod: a decomp-testing debug menu in egui (Insert)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+b5_mod_sdk = { path = "../b5_mod_sdk", features = ["egui"] }
+egui = "0.31"
