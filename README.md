@@ -1,4 +1,4 @@
-# b5_mods
+# b5_mods_rs
 
 Rust mods for Burnout 5 (`Burnout_PC.exe` built from
 [b5-decomp](https://github.com/BurnoutDecomp/b5-decomp)), as sandboxed **WebAssembly** for the
@@ -13,6 +13,8 @@ every OS/CPU the game is built for.
 - `debug_menu` — an example mod: a debug menu for testing the decomp in game (Insert).
   Vehicle (car change, infinite boost, invulnerability), teleport, motion, stats, traffic,
   race cars, the mod list, and the game's whole CgsDev debug menu in an egui window.
+
+The same API from C++ with Dear ImGui: [b5_mods_cpp](https://github.com/macadelic80/b5_mods_cpp).
 
 ## Build and install
 
