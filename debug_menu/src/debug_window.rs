@@ -2,17 +2,16 @@
 //!
 //! * Expanding a folder opens the component sections inside it, so their controls appear
 //!   (the host marks sections apart from actions: opening one never runs anything else).
-//! * Favourites (the star) are pinned on top and saved in favourites.txt next to the mod.
+//! * Favourites (the star) are pinned on top and saved in favourites.txt, the mod's storage.
 //! * Reset puts a variable back to the value it had when this window first saw it.
-//! * Export writes every changed variable to config.ini [Debug], which the game applies at
-//!   start-up (pc/debug/DebugIni.h), so a test set-up survives a restart.
+//! * Export writes every changed variable to config.ini [Debug] (brn.debugini.v1), which the
+//!   game applies at start-up (pc/debug/DebugIni.h), so a test set-up survives a restart.
 
-use b5_mod_sdk::{DebugVar, DebugVarKind, DebugVars, Host};
+use b5_mod_sdk::{host, DebugVar, DebugVarKind, DebugVars, Host};
 use egui::{Color32, RichText, Ui};
 use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::path::PathBuf;
-use std::time::Instant;
+
+const FAVOURITES_FILE: &str = "favourites.txt";
 
 pub struct DebugWindow {
     pub open: bool,
@@ -21,10 +20,8 @@ pub struct DebugWindow {
     search: String,
     opened_sections: HashSet<String>,             // sections this window already opened
     favourites: Vec<String>,
-    favourites_file: PathBuf,
     originals: HashMap<String, (f64, String)>,    // first value seen, and its text for set()
-    pending: HashMap<String, (f64, Instant)>,     // edits not yet seen back from the game
-    config_file: PathBuf,
+    pending: HashMap<String, (f64, f64)>,         // edits not yet seen back from the game, and when
     status: String,
 }
 
@@ -35,17 +32,12 @@ struct Node {
 }
 
 impl DebugWindow {
-    pub fn new(mod_directory: PathBuf) -> Self {
-        let favourites_file = mod_directory.join("favourites.txt");
-        let favourites = fs::read_to_string(&favourites_file)
+    pub fn new() -> Self {
+        let favourites = host()
+            .storage
+            .and_then(|s| s.read_string(FAVOURITES_FILE))
             .map(|text| text.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect())
             .unwrap_or_default();
-        // mods\<folder>\ -> the exe's folder, where config.ini lives.
-        let config_file = mod_directory
-            .parent()
-            .and_then(|mods| mods.parent())
-            .map(|game| game.join("config.ini"))
-            .unwrap_or_else(|| PathBuf::from("config.ini"));
         Self {
             open: false,
             vars: Vec::new(),
@@ -53,10 +45,8 @@ impl DebugWindow {
             search: String::new(),
             opened_sections: HashSet::new(),
             favourites,
-            favourites_file,
             originals: HashMap::new(),
             pending: HashMap::new(),
-            config_file,
             status: String::new(),
         }
     }
@@ -76,7 +66,8 @@ impl DebugWindow {
                 }
             }
         }
-        self.pending.retain(|_, (_, at)| at.elapsed().as_secs_f32() < 0.6);
+        let now = host.time();
+        self.pending.retain(|_, (_, at)| now - *at < 0.6);
 
         let mut open = self.open;
         egui::Window::new("Debug menu")
@@ -110,7 +101,7 @@ impl DebugWindow {
             ui.label("Search");
             ui.add(egui::TextEdit::singleline(&mut self.search).desired_width(200.0));
             if ui.button("Export to config.ini").on_hover_text("Changed values become config.ini [Debug] lines").clicked() {
-                self.status = self.export(service);
+                self.status = self.export(host(), service);
             }
         });
         let changed = self.vars.iter().filter(|v| self.is_changed(v)).count();
@@ -281,12 +272,14 @@ impl DebugWindow {
             } else {
                 self.favourites.push(path.to_string());
             }
-            let _ = fs::write(&self.favourites_file, self.favourites.join("\r\n"));
+            if let Some(storage) = host().storage {
+                storage.write(FAVOURITES_FILE, self.favourites.join("\r\n").as_bytes());
+            }
         }
     }
 
     fn send(&mut self, service: DebugVars, var: &DebugVar, value: f64, text: String) {
-        self.pending.insert(var.path.clone(), (value, Instant::now()));
+        self.pending.insert(var.path.clone(), (value, host().time()));
         service.set(&var.path, &text);
     }
 
@@ -297,57 +290,29 @@ impl DebugWindow {
     }
 
     /// Changed values become `path=value` lines of config.ini [Debug]; values back at their
-    /// original drop their line. Lines for variables this window has not seen are kept.
-    fn export(&self, service: DebugVars) -> String {
-        let mut wanted: HashMap<String, Option<String>> = HashMap::new();
+    /// original drop their line. Lines for variables this window has not seen are kept. The host
+    /// writes the lines (brn.debugini.v1): the mod cannot open config.ini itself.
+    fn export(&self, host: &Host, service: DebugVars) -> String {
+        let Some(ini) = host.debug_ini else { return "This build has no brn.debugini.v1.".into() };
+        let (mut written, mut failed) = (0, 0);
         for var in self.vars.iter().filter(|v| is_value(v) && !v.read_only) {
-            let key = ini_key(&var.path);
-            if self.is_changed(var) {
-                wanted.insert(key, Some(format!("{}={}", var.path, value_text(var, var.value, &service))));
+            let value = if self.is_changed(var) {
+                value_text(var, var.value, &service)
             } else if self.originals.contains_key(&var.path) {
-                wanted.insert(key, None);
+                String::new()   // back at its original: drop the line
+            } else {
+                continue;
+            };
+            if !ini.set(&ini_key(&var.path), &value) {
+                failed += 1;
+            } else if !value.is_empty() {
+                written += 1;
             }
         }
-        let text = fs::read_to_string(&self.config_file).unwrap_or_default();
-        let mut lines: Vec<String> = text.lines().map(String::from).collect();
-        let section = lines.iter().position(|l| l.trim().eq_ignore_ascii_case("[debug]"));
-        let start = match section {
-            Some(at) => at + 1,
-            None => {
-                lines.push(String::new());
-                lines.push("[Debug]".into());
-                lines.len()
-            }
-        };
-        let end = lines[start..].iter().position(|l| l.trim_start().starts_with('[')).map_or(lines.len(), |p| start + p);
-        let mut kept = Vec::new();
-        let mut written = 0;
-        for line in &lines[start..end] {
-            let key = line.split('=').next().map(ini_key).unwrap_or_default();
-            let is_entry = line.contains('=') && !line.trim_start().starts_with(';');
-            match wanted.remove(&key) {
-                Some(Some(new_line)) if is_entry => {
-                    kept.push(new_line);
-                    written += 1;
-                }
-                Some(None) if is_entry => {}
-                _ => kept.push(line.clone()),
-            }
-        }
-        // Insert the new lines before the section's trailing blank lines.
-        let mut tail = Vec::new();
-        while kept.last().is_some_and(|l| l.trim().is_empty()) {
-            tail.push(kept.pop().unwrap());
-        }
-        for new_line in wanted.into_values().flatten() {
-            kept.push(new_line);
-            written += 1;
-        }
-        kept.extend(tail);
-        lines.splice(start..end, kept);
-        match fs::write(&self.config_file, lines.join("\r\n") + "\r\n") {
-            Ok(()) => format!("Exported {written} values to {}.", self.config_file.display()),
-            Err(error) => format!("Export failed: {error}"),
+        if failed == 0 {
+            format!("Exported {written} values to config.ini.")
+        } else {
+            format!("Exported {written} values to config.ini, {failed} refused.")
         }
     }
 }

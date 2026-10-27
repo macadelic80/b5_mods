@@ -1,11 +1,14 @@
-//! Field-for-field mirror of `b5-decomp/src/pc/mods/api/brn_mod_api.h` (API version 1).
-//! Keep the two in step: the host checks only the version number.
+//! Field-for-field mirror of `b5-decomp/src/pc/mods/api/brn_mod_api.h` (API version 2, the
+//! WebAssembly tier). Keep the two in step: the structs are copied byte for byte between the game
+//! and the mod's memory, and the host checks only the version number.
 
 #![allow(non_camel_case_types)]
+// Several modules export a `get` / `count` / `set`: same import name, different import module.
+// The wasm imports stay distinct (module.name, each with its own signature); the lint only
+// compares the bare names.
+#![allow(clashing_extern_declarations)]
 
-use std::ffi::{c_char, c_void};
-
-pub const BRN_MOD_API_VERSION: u32 = 1;
+pub const BRN_MOD_API_VERSION: u32 = 2;
 
 pub const BRN_MODIFIER_CTRL: u32 = 1;
 pub const BRN_MODIFIER_SHIFT: u32 = 2;
@@ -17,58 +20,12 @@ pub const BRN_CAPTURE_MOUSE: u32 = 2;
 pub const BRN_CAPTURE_GAMEPAD: u32 = 4;
 
 #[repr(C)]
-pub struct BrnMod {
-    _private: [u8; 0],
-}
-
-#[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct BrnVec3 {
     pub x: f32,
     pub y: f32,
     pub z: f32,
 }
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct BrnFrameContext {
-    pub d3d9_device: *mut c_void,
-    pub hwnd: *mut c_void,
-    pub width: u32,
-    pub height: u32,
-    pub delta_seconds: f32,
-    pub frame_index: u64,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct BrnWindowMessage {
-    pub hwnd: *mut c_void,
-    pub msg: u32,
-    pub wparam: u64,
-    pub lparam: i64,
-    pub modifiers: u32,
-}
-
-#[repr(C)]
-pub struct BrnModCallbacks {
-    pub size: u32,
-    pub user: *mut c_void,
-    pub on_message: Option<unsafe extern "C" fn(*mut c_void, *const BrnWindowMessage)>,
-    pub on_frame: Option<unsafe extern "C" fn(*mut c_void, *const BrnFrameContext)>,
-    pub on_game_tick: Option<unsafe extern "C" fn(*mut c_void)>,
-    pub on_shutdown: Option<unsafe extern "C" fn(*mut c_void)>,
-}
-
-#[repr(C)]
-pub struct BrnHostApi {
-    pub size: u32,
-    pub api_version: u32,
-    pub self_: *mut BrnMod,
-    pub get_service: unsafe extern "C" fn(*const c_char) -> *const c_void,
-}
-
-// ---- brn.core.v1 -----------------------------------------------------------------------
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -80,19 +37,6 @@ pub struct BrnModInfo {
     pub enabled: i32,
     pub error: [u8; 128],
 }
-
-#[repr(C)]
-pub struct BrnCoreV1 {
-    pub size: u32,
-    pub log: unsafe extern "C" fn(*mut BrnMod, *const c_char),
-    pub mod_directory: unsafe extern "C" fn(*mut BrnMod) -> *const c_char,
-    pub set_input_capture: unsafe extern "C" fn(*mut BrnMod, u32),
-    pub mod_count: unsafe extern "C" fn() -> i32,
-    pub get_mod_info: unsafe extern "C" fn(i32, *mut BrnModInfo) -> i32,
-    pub set_mod_enabled: unsafe extern "C" fn(i32, i32),
-}
-
-// ---- brn.player.v1 ---------------------------------------------------------------------
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -123,20 +67,6 @@ pub struct BrnPlayerState {
 }
 
 #[repr(C)]
-pub struct BrnPlayerV1 {
-    pub size: u32,
-    pub get_state: unsafe extern "C" fn(*mut BrnPlayerState) -> i32,
-    pub teleport: unsafe extern "C" fn(BrnVec3, BrnVec3),
-    pub reset_on_track: unsafe extern "C" fn(f32),
-    pub place_on_track: unsafe extern "C" fn(BrnVec3, BrnVec3, f32),
-    pub set_infinite_boost: unsafe extern "C" fn(i32),
-    pub set_invulnerable: unsafe extern "C" fn(i32),
-    pub change_car: unsafe extern "C" fn(u64, u64) -> i32,
-}
-
-// ---- brn.vehicles.v1 -------------------------------------------------------------------
-
-#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct BrnVehicleInfo {
     pub id: u64,
@@ -151,15 +81,6 @@ pub struct BrnVehicleInfo {
 }
 
 #[repr(C)]
-pub struct BrnVehiclesV1 {
-    pub size: u32,
-    pub count: unsafe extern "C" fn() -> i32,
-    pub get: unsafe extern "C" fn(i32, *mut BrnVehicleInfo) -> i32,
-}
-
-// ---- brn.locations.v1 ------------------------------------------------------------------
-
-#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct BrnLocation {
     pub label: [u8; 96],
@@ -168,15 +89,6 @@ pub struct BrnLocation {
     pub position: BrnVec3,
     pub direction: BrnVec3,
 }
-
-#[repr(C)]
-pub struct BrnLocationsV1 {
-    pub size: u32,
-    pub count: unsafe extern "C" fn() -> i32,
-    pub get: unsafe extern "C" fn(i32, *mut BrnLocation) -> i32,
-}
-
-// ---- brn.racecars.v1 -------------------------------------------------------------------
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -193,16 +105,6 @@ pub struct BrnRaceCarInfo {
 }
 
 #[repr(C)]
-pub struct BrnRaceCarsV1 {
-    pub size: u32,
-    pub count: unsafe extern "C" fn() -> i32,
-    pub get: unsafe extern "C" fn(i32, *mut BrnRaceCarInfo) -> i32,
-    pub remove_all_rivals: unsafe extern "C" fn(),
-}
-
-// ---- brn.traffic.v1 --------------------------------------------------------------------
-
-#[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct BrnTrafficSettings {
     pub size: u32,
@@ -215,16 +117,6 @@ pub struct BrnTrafficSettings {
     pub big_vehicle_amount: i32,
     pub final_density: f32,
 }
-
-#[repr(C)]
-pub struct BrnTrafficV1 {
-    pub size: u32,
-    pub get: unsafe extern "C" fn(*mut BrnTrafficSettings) -> i32,
-    pub set: unsafe extern "C" fn(*const BrnTrafficSettings),
-    pub kill_near_player: unsafe extern "C" fn(),
-}
-
-// ---- brn.debugvars.v1 ------------------------------------------------------------------
 
 pub const BRN_DEBUGVAR_MENU: i32 = 0;
 pub const BRN_DEBUGVAR_FUNCTION: i32 = 1;
@@ -251,14 +143,199 @@ pub struct BrnDebugVar {
     pub text: [u8; 64],
 }
 
+// ---- input --------------------------------------------------------------------------------
+
+pub const BRN_INPUT_MOUSE_MOVE: u32 = 1;
+pub const BRN_INPUT_MOUSE_BUTTON: u32 = 2;
+pub const BRN_INPUT_MOUSE_WHEEL: u32 = 3;
+pub const BRN_INPUT_MOUSE_LEAVE: u32 = 4;
+pub const BRN_INPUT_KEY: u32 = 5;
+pub const BRN_INPUT_TEXT: u32 = 6;
+pub const BRN_INPUT_FOCUS: u32 = 7;
+pub const BRN_INPUT_RESIZE: u32 = 8;
+
+pub const BRN_MOUSE_LEFT: i32 = 0;
+pub const BRN_MOUSE_RIGHT: i32 = 1;
+pub const BRN_MOUSE_MIDDLE: i32 = 2;
+pub const BRN_MOUSE_X1: i32 = 3;
+pub const BRN_MOUSE_X2: i32 = 4;
+
+pub const BRN_KEY_ESCAPE: i32 = 256;
+pub const BRN_KEY_ENTER: i32 = 257;
+pub const BRN_KEY_TAB: i32 = 258;
+pub const BRN_KEY_BACKSPACE: i32 = 259;
+pub const BRN_KEY_INSERT: i32 = 260;
+pub const BRN_KEY_DELETE: i32 = 261;
+pub const BRN_KEY_RIGHT: i32 = 262;
+pub const BRN_KEY_LEFT: i32 = 263;
+pub const BRN_KEY_DOWN: i32 = 264;
+pub const BRN_KEY_UP: i32 = 265;
+pub const BRN_KEY_PAGE_UP: i32 = 266;
+pub const BRN_KEY_PAGE_DOWN: i32 = 267;
+pub const BRN_KEY_HOME: i32 = 268;
+pub const BRN_KEY_END: i32 = 269;
+pub const BRN_KEY_F1: i32 = 290;
+pub const BRN_KEY_KP_0: i32 = 320;
+pub const BRN_KEY_KP_ENTER: i32 = 335;
+
 #[repr(C)]
-pub struct BrnDebugVarsV1 {
-    pub size: u32,
-    pub refresh: unsafe extern "C" fn() -> u32,
-    pub count: unsafe extern "C" fn() -> i32,
-    pub get: unsafe extern "C" fn(i32, *mut BrnDebugVar) -> i32,
-    pub option_count: unsafe extern "C" fn(i32) -> i32,
-    pub get_option: unsafe extern "C" fn(i32, i32, *mut c_char, i32, *mut i32) -> i32,
-    pub set: unsafe extern "C" fn(*const c_char, *const c_char),
-    pub call: unsafe extern "C" fn(*const c_char),
+#[derive(Clone, Copy, Debug, Default)]
+pub struct brn_input_event {
+    pub type_: u32,
+    pub modifiers: u32,
+    pub code: i32,
+    pub pressed: i32,
+    pub repeat: i32,
+    pub x: f32,
+    pub y: f32,
+}
+
+pub const BRN_INPUT_BUFFER_CAPACITY: usize = 64;
+
+// ---- UI -----------------------------------------------------------------------------------
+
+/// pos, uv, colour bytes r g b a: the layout of `egui::epaint::Vertex`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct brn_vertex {
+    pub x: f32,
+    pub y: f32,
+    pub u: f32,
+    pub v: f32,
+    pub rgba: u32,
+}
+
+pub const BRN_UI_PREMULTIPLIED: u32 = 1;
+
+// ---- host imports -------------------------------------------------------------------------
+
+#[link(wasm_import_module = "brn.core.v1")]
+extern "C" {
+    #[link_name = "log"]
+    pub fn core_log(text: *const u8, len: u32);
+    #[link_name = "has_module"]
+    pub fn core_has_module(name: *const u8, len: u32) -> i32;
+    #[link_name = "time"]
+    pub fn core_time() -> f64;
+    #[link_name = "set_input_capture"]
+    pub fn core_set_input_capture(flags: u32);
+    #[link_name = "mod_count"]
+    pub fn core_mod_count() -> i32;
+    #[link_name = "get_mod_info"]
+    pub fn core_get_mod_info(index: i32, out: *mut BrnModInfo) -> i32;
+    #[link_name = "set_mod_enabled"]
+    pub fn core_set_mod_enabled(index: i32, enabled: i32);
+}
+
+#[link(wasm_import_module = "brn.player.v1")]
+extern "C" {
+    #[link_name = "get_state"]
+    pub fn player_get_state(out: *mut BrnPlayerState) -> i32;
+    #[link_name = "teleport"]
+    pub fn player_teleport(x: f32, y: f32, z: f32, dx: f32, dy: f32, dz: f32);
+    #[link_name = "reset_on_track"]
+    pub fn player_reset_on_track(speed_mph: f32);
+    #[link_name = "place_on_track"]
+    pub fn player_place_on_track(x: f32, y: f32, z: f32, dx: f32, dy: f32, dz: f32, speed_mph: f32);
+    #[link_name = "set_infinite_boost"]
+    pub fn player_set_infinite_boost(enabled: i32);
+    #[link_name = "set_invulnerable"]
+    pub fn player_set_invulnerable(enabled: i32);
+    #[link_name = "change_car"]
+    pub fn player_change_car(car_id: u64, wheel_id: u64) -> i32;
+}
+
+#[link(wasm_import_module = "brn.vehicles.v1")]
+extern "C" {
+    #[link_name = "count"]
+    pub fn vehicles_count() -> i32;
+    #[link_name = "get"]
+    pub fn vehicles_get(index: i32, out: *mut BrnVehicleInfo) -> i32;
+}
+
+#[link(wasm_import_module = "brn.locations.v1")]
+extern "C" {
+    #[link_name = "count"]
+    pub fn locations_count() -> i32;
+    #[link_name = "get"]
+    pub fn locations_get(index: i32, out: *mut BrnLocation) -> i32;
+}
+
+#[link(wasm_import_module = "brn.racecars.v1")]
+extern "C" {
+    #[link_name = "count"]
+    pub fn racecars_count() -> i32;
+    #[link_name = "get"]
+    pub fn racecars_get(index: i32, out: *mut BrnRaceCarInfo) -> i32;
+    #[link_name = "remove_all_rivals"]
+    pub fn racecars_remove_all_rivals();
+}
+
+#[link(wasm_import_module = "brn.traffic.v1")]
+extern "C" {
+    #[link_name = "get"]
+    pub fn traffic_get(out: *mut BrnTrafficSettings) -> i32;
+    #[link_name = "set"]
+    pub fn traffic_set(settings: *const BrnTrafficSettings);
+    #[link_name = "kill_near_player"]
+    pub fn traffic_kill_near_player();
+}
+
+#[link(wasm_import_module = "brn.debugvars.v1")]
+extern "C" {
+    #[link_name = "refresh"]
+    pub fn debugvars_refresh() -> u32;
+    #[link_name = "count"]
+    pub fn debugvars_count() -> i32;
+    #[link_name = "get"]
+    pub fn debugvars_get(index: i32, out: *mut BrnDebugVar) -> i32;
+    #[link_name = "option_count"]
+    pub fn debugvars_option_count(index: i32) -> i32;
+    #[link_name = "get_option"]
+    pub fn debugvars_get_option(index: i32, option: i32, name: *mut u8, name_size: i32, value: *mut i32) -> i32;
+    #[link_name = "set"]
+    pub fn debugvars_set(path: *const u8, path_len: u32, value: *const u8, value_len: u32);
+    #[link_name = "call"]
+    pub fn debugvars_call(path: *const u8, path_len: u32);
+}
+
+#[link(wasm_import_module = "brn.debugini.v1")]
+extern "C" {
+    #[link_name = "set"]
+    pub fn debugini_set(path: *const u8, path_len: u32, value: *const u8, value_len: u32) -> i32;
+}
+
+#[link(wasm_import_module = "brn.storage.v1")]
+extern "C" {
+    #[link_name = "read"]
+    pub fn storage_read(file: *const u8, file_len: u32, out: *mut u8, capacity: u32) -> i32;
+    #[link_name = "write"]
+    pub fn storage_write(file: *const u8, file_len: u32, data: *const u8, size: u32) -> i32;
+    #[link_name = "remove"]
+    pub fn storage_remove(file: *const u8, file_len: u32) -> i32;
+}
+
+#[link(wasm_import_module = "brn.ui.v1")]
+extern "C" {
+    #[link_name = "texture_create"]
+    pub fn ui_texture_create(rgba: *const u8, w: i32, h: i32) -> u32;
+    #[link_name = "texture_update"]
+    pub fn ui_texture_update(tex: u32, x: i32, y: i32, w: i32, h: i32, rgba: *const u8);
+    #[link_name = "texture_destroy"]
+    pub fn ui_texture_destroy(tex: u32);
+    #[link_name = "submit32"]
+    pub fn ui_submit32(
+        v: *const brn_vertex,
+        nv: u32,
+        idx: *const u32,
+        ni: u32,
+        tex: u32,
+        clip_x0: f32,
+        clip_y0: f32,
+        clip_x1: f32,
+        clip_y1: f32,
+        flags: u32,
+    );
+    #[link_name = "set_clipboard_text"]
+    pub fn ui_set_clipboard_text(text: *const u8, len: u32);
 }

@@ -1,0 +1,3 @@
+# Every crate here is a Burnout_PC.exe mod: one .wasm for every OS and CPU.
+[build]
+target = "wasm32-unknown-unknown"

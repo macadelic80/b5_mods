@@ -1,20 +1,13 @@
 [package]
 name = "b5_mod_sdk"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "Rust side of b5-decomp/src/pc/mods/api/brn_mod_api.h: write Burnout_PC.exe mods in Rust"
+description = "Rust side of b5-decomp/src/pc/mods/api/brn_mod_api.h: write sandboxed WebAssembly mods for Burnout_PC.exe"
 
 [features]
 default = []
-# An egui overlay drawn with the game's D3D9 device, plus a software cursor.
-egui = ["dep:egui", "dep:windows"]
+# An egui overlay: egui's meshes go to the host as brn.ui.v1 draw lists.
+egui = ["dep:egui"]
 
 [dependencies]
-egui = { version = "0.31", optional = true }
-windows = { version = "0.59", optional = true, features = [
-    "Win32_Foundation",
-    "Win32_Graphics_Direct3D9",
-    "Win32_System_DataExchange",
-    "Win32_System_Memory",
-    "Win32_UI_WindowsAndMessaging",
-] }
+egui = { version = "0.31", optional = true, default-features = false, features = ["default_fonts"] }

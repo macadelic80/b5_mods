@@ -6,20 +6,16 @@
 use b5_mod_sdk::overlay::Overlay;
 mod debug_window;
 
+use b5_mod_sdk::ffi::{BRN_INPUT_KEY, BRN_KEY_ESCAPE, BRN_KEY_INSERT};
 use b5_mod_sdk::{
-    export_mod, host, Frame, Host, Location, Mod, RaceCarInfo, TrafficSettings, Vec3, VehicleInfo, WindowMessage,
+    export_mod, host, Frame, Host, InputEvent, Location, Mod, RaceCarInfo, TrafficSettings, Vec3, VehicleInfo,
     BRN_CAPTURE_KEYBOARD, BRN_CAPTURE_MOUSE,
 };
 use debug_window::DebugWindow;
 use egui::{Align2, Color32, Context, RichText};
 use std::cell::Cell;
-use std::fs;
-use std::path::PathBuf;
 use std::rc::Rc;
 
-const WM_KEYDOWN: u32 = 0x0100;
-const VK_ESCAPE: u64 = 0x1B;
-const VK_INSERT: u64 = 0x2D;
 const MPH_TO_KMH: f32 = 1.609_344;
 
 // The original debug menu's car filters (ResetPlayerDebugComponent: label, CgsID prefix).
@@ -46,7 +42,7 @@ impl DebugMenu {
     fn new(host: &Host) -> Self {
         host.log("debug menu ready -- Insert to open");
         let open = Rc::new(Cell::new(false));
-        let app = App::new(open.clone(), host.mod_directory());
+        let app = App::new(open.clone());
         Self { overlay: Overlay::new(App::ui, app), open, capturing: false }
     }
 
@@ -59,20 +55,19 @@ impl DebugMenu {
 }
 
 impl Mod for DebugMenu {
-    fn on_message(&mut self, host: &Host, message: &WindowMessage) {
-        let first_press = message.lparam & (1 << 30) == 0;
-        if message.msg == WM_KEYDOWN && first_press {
-            if message.wparam == VK_INSERT {
+    fn on_input(&mut self, host: &Host, event: &InputEvent) {
+        if event.type_ == BRN_INPUT_KEY && event.pressed != 0 && event.repeat == 0 {
+            if event.code == BRN_KEY_INSERT {
                 let open = !self.open.get();
                 self.set_open(host, open);
                 return;
             }
-            if message.wparam == VK_ESCAPE && self.open.get() {
+            if event.code == BRN_KEY_ESCAPE && self.open.get() {
                 self.set_open(host, false);
                 return;
             }
         }
-        self.overlay.message(message);
+        self.overlay.input(event);
     }
 
     fn on_frame(&mut self, host: &Host, frame: &Frame) {
@@ -123,16 +118,14 @@ struct App {
     target: Vec3,
     saved: Vec<SavedPosition>,
     saved_name: String,
-    saved_file: PathBuf,
     launch_mph: f32,
     status: String,
     debug_window: DebugWindow,
 }
 
 impl App {
-    fn new(open: Rc<Cell<bool>>, directory: PathBuf) -> Self {
-        let saved_file = directory.join("positions.txt");
-        let debug_window = DebugWindow::new(directory.clone());
+    fn new(open: Rc<Cell<bool>>) -> Self {
+        let debug_window = DebugWindow::new();
         Self {
             open,
             tab: Tab::Vehicle,
@@ -146,9 +139,8 @@ impl App {
             locations: Vec::new(),
             location_filter: String::new(),
             target: Vec3::default(),
-            saved: load_positions(&saved_file),
+            saved: load_positions(),
             saved_name: String::new(),
-            saved_file,
             launch_mph: 100.0,
             status: String::new(),
             debug_window,
@@ -301,7 +293,7 @@ impl App {
                     };
                     self.saved.push(SavedPosition { name, position: state.position, direction: state.direction });
                     self.saved_name.clear();
-                    save_positions(&self.saved_file, &self.saved);
+                    save_positions(&self.saved);
                 }
             }
         });
@@ -319,7 +311,7 @@ impl App {
         }
         if let Some(index) = remove {
             self.saved.remove(index);
-            save_positions(&self.saved_file, &self.saved);
+            save_positions(&self.saved);
         }
 
         ui.separator();
@@ -515,10 +507,12 @@ fn go_behind(host: &Host, car: &RaceCarInfo) {
     player.teleport(target, d);
 }
 
-// ---- positions.txt: "name|x|y|z|dx|dy|dz" per line ----------------------------------------
+// ---- positions.txt, in the mod's storage: "name|x|y|z|dx|dy|dz" per line ---------------------
 
-fn load_positions(path: &PathBuf) -> Vec<SavedPosition> {
-    let Ok(text) = fs::read_to_string(path) else { return Vec::new() };
+const POSITIONS_FILE: &str = "positions.txt";
+
+fn load_positions() -> Vec<SavedPosition> {
+    let Some(text) = host().storage.and_then(|s| s.read_string(POSITIONS_FILE)) else { return Vec::new() };
     text.lines()
         .filter_map(|line| {
             let mut parts = line.split('|');
@@ -534,7 +528,7 @@ fn load_positions(path: &PathBuf) -> Vec<SavedPosition> {
         .collect()
 }
 
-fn save_positions(path: &PathBuf, saved: &[SavedPosition]) {
+fn save_positions(saved: &[SavedPosition]) {
     let text: String = saved
         .iter()
         .map(|s| {
@@ -542,7 +536,7 @@ fn save_positions(path: &PathBuf, saved: &[SavedPosition]) {
             format!("{}|{}|{}|{}|{}|{}|{}\n", s.name, p.x, p.y, p.z, d.x, d.y, d.z)
         })
         .collect();
-    if let Err(error) = fs::write(path, text) {
-        host().log(&format!("could not save {}: {error}", path.display()));
+    if !host().storage.is_some_and(|s| s.write(POSITIONS_FILE, text.as_bytes())) {
+        host().log(&format!("could not save {POSITIONS_FILE}"));
     }
 }

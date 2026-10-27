@@ -4,5 +4,7 @@ members = ["b5_mod_sdk", "debug_menu"]
 
 [profile.release]
 opt-level = 3
-debug = 1          # keep symbols: a mod crash shows up named in BrnGame.log
-panic = "unwind"   # the SDK catches panics at the C boundary; abort would kill the game
+debug = false
+strip = "debuginfo" # drop DWARF, keep the wasm name section: a trap's backtrace in BrnGame.log names the function
+panic = "abort"    # a panic is logged by the SDK's hook, then traps; the host switches the mod off
+lto = true
